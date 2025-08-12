@@ -542,6 +542,7 @@ class DiffusionControl2WorldGenerationPipeline(BaseWorldGenerationPipeline):
 
         video = []
         prev_frames = None
+        prev_latents = None
         for i_clip in tqdm(range(N_clip)):
             # data_batch_i = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in data_batch.items()}
             data_batch_i = {k: v for k, v in data_batch.items()}
@@ -584,6 +585,18 @@ class DiffusionControl2WorldGenerationPipeline(BaseWorldGenerationPipeline):
                 latent_tmp = latent_hint if latent_hint.ndim == 5 else latent_hint[:, 0]
                 condition_latent = torch.zeros_like(latent_tmp)
             else:
+               num_input_frames = self.num_input_frames
+               # Simple periodic reset approach - clean and effective
+               # if prev_latents is not None:
+               #     # Solution #2: Use stored latents to avoid VAE encode-decode roundtrip
+               #     condition_latent = prev_latents
+               # else:
+                   # Fallback to original method
+               prev_frames_patched = split_video_into_patches(
+                   prev_frames, control_input.shape[-2], control_input.shape[-1]
+               )
+               input_frames = prev_frames_patched.bfloat16().cuda() / 255.0 * 2 - 1
+               condition_latent = self.model.encode(input_frames)[:, :, -self.num_input_frames :].contiguous()
 
             # Generate video frames for this clip (batched)
             log.info("Starting diffusion sampling")
@@ -610,6 +623,12 @@ class DiffusionControl2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             else:
                 video.append(frames[:, :, self.num_input_frames :])
 
+            # Store both decoded frames and latents for next run
+            prev_frames = torch.zeros_like(frames)
+            prev_frames[:, :, : self.num_input_frames] = frames[:, :, -self.num_input_frames :]
+            
+            # Store latents cleanly without any modification
+            # prev_latents = latents[:, :, -self.num_input_frames :].contiguous()
 
         video = torch.cat(video, dim=2)[:, :, :T]
         # Keep fp32 precision - convert to uint8 only at final output if needed

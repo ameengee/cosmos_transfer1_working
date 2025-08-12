@@ -219,7 +219,7 @@ class VideoDiffusionModelWithCtrl(DiffusionV2WModel):
             condition_latent, condition, num_condition_t
         )
 
-        uncondition.video_cond_bool = False  # Not do cfg on condition frames
+        uncondition.video_cond_bool = True  # The fucking problem
         uncondition = self.add_condition_video_indicator_and_video_input_mask(
             condition_latent, uncondition, num_condition_t
         )
