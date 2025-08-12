@@ -44,4 +44,10 @@ RUN apt-get install -y libmagic1
 RUN mkdir -p /workspace
 WORKDIR /workspace
 
+# Install additional pip deps
+RUN pip install vllm==0.9.0
+RUN pip uninstall -y transformer_engine transformer_engine_cu12 transformer_engine_torch
+RUN pip install "transformer-engine[pytorch]==1.12.0"
+RUN pip install --upgrade megatron-core==0.10.0
+
 CMD ["/bin/bash"]
