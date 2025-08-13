@@ -363,7 +363,7 @@ class DiffusionControl2WorldGenerationPipeline(BaseWorldGenerationPipeline):
     def _load_tokenizer(self):
         load_tokenizer_model(self.model, f"{self.checkpoint_dir}/{COSMOS_TOKENIZER_CHECKPOINT}")
 
-    def _run_tokenizer_decoding(self, sample: torch.Tensor) -> np.ndarray:
+    def _run_tokenizer_decoding(self, sample: torch.Tensor, use_batch: bool = True) -> np.ndarray:
         """Decode latent samples to video frames using the tokenizer decoder.
 
         Args:
@@ -374,37 +374,32 @@ class DiffusionControl2WorldGenerationPipeline(BaseWorldGenerationPipeline):
                         with values in range [0, 255]
         """
         # Decode video
-        # if sample.shape[0] == 1:
-        #     video = (1.0 + self.model.decode(sample)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-        # else:
-        #     # Do decoding for each batch sequentially to prevent OOM.
-        #     samples = []
-        #     for sample_i in sample:
-        #         samples += [self.model.decode(sample_i.unsqueeze(0)).cpu()]
-        #     samples = (torch.cat(samples) + 1).clamp(0, 2) / 2
+        if sample.shape[0] == 1 or use_batch:
+            video = (1.0 + self.model.decode(sample)).clamp(0, 2) / 2  # [B, 3, T, H, W]
+        else:
+            # Do decoding for each batch sequentially to prevent OOM.
+            samples = []
+            for sample_i in sample:
+                samples += [self.model.decode(sample_i.unsqueeze(0)).cpu()]
+            samples = (torch.cat(samples) + 1).clamp(0, 2) / 2
+            # samples = (torch.stack(samples) + 1).clamp(0, 2) / 2
 
-        #     # Stitch the patches together to form the final video.
-        #     patch_h, patch_w = samples.shape[-2:]
-        #     orig_size = (patch_w, patch_h)
-        #     aspect_ratio = detect_aspect_ratio(orig_size)
-        #     stitch_w, stitch_h = get_upscale_size(orig_size, aspect_ratio, upscale_factor=3)
-        #     n_img_w = (stitch_w - 1) // patch_w + 1
-        #     n_img_h = (stitch_h - 1) // patch_h + 1
-        #     overlap_size_w = overlap_size_h = 0
-        #     if n_img_w > 1:
-        #         overlap_size_w = (n_img_w * patch_w - stitch_w) // (n_img_w - 1)
-        #     if n_img_h > 1:
-        #         overlap_size_h = (n_img_h * patch_h - stitch_h) // (n_img_h - 1)
-        #     from einops import rearrange
-        #     samples = rearrange(samples, "(n t) b ... -> (b n t) ...", n=n_img_h, t=n_img_w)
-        #     video = merge_patches_into_video(samples, overlap_size_h, overlap_size_w, n_img_h, n_img_w)
-        #     video = torch.nn.functional.interpolate(video[0], size=(patch_h * 3, patch_w * 3), mode="bicubic")[None]
-        #     video = video.clamp(0, 1)
-        # video = (video[0].permute(1, 2, 3, 0) * 255).to(torch.uint8).cpu().numpy()
-
-        video = (1.0 + self.model.decode(sample)).clamp(0, 2) / 2  # [B, 3, T, H, W]
-        # Keep in fp32 for maximum quality - no uint8 conversion
-        video = (video * 255).float().cpu()
+            # Stitch the patches together to form the final video.
+            patch_h, patch_w = samples.shape[-2:]
+            orig_size = (patch_w, patch_h)
+            aspect_ratio = detect_aspect_ratio(orig_size)
+            stitch_w, stitch_h = get_upscale_size(orig_size, aspect_ratio, upscale_factor=3)
+            n_img_w = (stitch_w - 1) // patch_w + 1
+            n_img_h = (stitch_h - 1) // patch_h + 1
+            overlap_size_w = overlap_size_h = 0
+            if n_img_w > 1:
+                overlap_size_w = (n_img_w * patch_w - stitch_w) // (n_img_w - 1)
+            if n_img_h > 1:
+                overlap_size_h = (n_img_h * patch_h - stitch_h) // (n_img_h - 1)
+            video = merge_patches_into_video(samples, overlap_size_h, overlap_size_w, n_img_h, n_img_w)
+            video = torch.nn.functional.interpolate(video[0], size=(patch_h * 3, patch_w * 3), mode="bicubic")[None]
+            video = video.clamp(0, 1)
+        video = (video * 255).to(torch.uint8).cpu()
         return video
 
     def _run_model_with_offload(
